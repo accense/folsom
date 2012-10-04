@@ -35,7 +35,7 @@
         ]).
 
 %% exported for eunit test
--export([convert_cpu_topology/2]).
+-export([convert_system_info/1]).
 
 -include("folsom.hrl").
 
@@ -98,8 +98,10 @@ convert_system_info({c_compiler_used, {Compiler, Version}}) ->
     [{compiler, Compiler}, {version, convert_c_compiler_version(Version)}];
 convert_system_info({cpu_topology, undefined}) ->
     undefined;
-convert_system_info({cpu_topology, List}) ->
+convert_system_info({cpu_topology, List}) when is_list(List) ->
     [{Type, convert_cpu_topology(Item, [])} || {Type, Item} <- List];
+convert_system_info({cpu_topology, {logical,Item}}) ->
+    convert_system_info({cpu_topology, [{processor,[{core,{logical,Item}}]}]});
 convert_system_info({dist_ctrl, List}) ->
     lists:map(fun({Node, Socket}) ->
                       {ok, Stats} = inet:getstat(Socket),
@@ -130,22 +132,24 @@ convert_allocated_areas({Key, Value}) ->
 convert_c_compiler_version({A, B, C}) ->
     list_to_binary(io_lib:format("~p.~p.~p", [A, B, C]));
 convert_c_compiler_version({A, B}) ->
-    list_to_binary(io_lib:format("~p.~p", [A, B])).
+    list_to_binary(io_lib:format("~p.~p", [A, B]));
+convert_c_compiler_version(A) ->
+    list_to_binary(io_lib:format("~p", [A])).
 
 convert_cpu_topology([{core, Value}| Tail], Acc) when is_tuple(Value) ->
-  convert_cpu_topology(Tail, lists:append(Acc, [{core, tuple_to_list(Value)}]));
+    convert_cpu_topology(Tail, lists:append(Acc, [{core, tuple_to_list(Value)}]));
 convert_cpu_topology([{core, Value}| Tail], Acc) when is_list(Value) ->
-  convert_cpu_topology(Tail, lists:append(Acc, [{core, convert_cpu_topology(Value, [])}]));
+    convert_cpu_topology(Tail, lists:append(Acc, [{core, convert_cpu_topology(Value, [])}]));
 convert_cpu_topology([{thread, Value}| Tail], Acc) ->
-  convert_cpu_topology(Tail, lists:append(Acc, [{thread, tuple_to_list(Value)}]));
-convert_cpu_topology({logical, Value}, Acc) ->
-  convert_cpu_topology([], lists:append(Acc, [logical, Value]));
+    convert_cpu_topology(Tail, lists:append(Acc, [{thread, tuple_to_list(Value)}]));
 convert_cpu_topology([{node, Value}| Tail], Acc) ->
-  convert_cpu_topology(Tail, lists:append(Acc, [{node, convert_cpu_topology(Value, [])}]));
+    convert_cpu_topology(Tail, lists:append(Acc, [{node, convert_cpu_topology(Value, [])}]));
 convert_cpu_topology([{processor, Value}| Tail], Acc) ->
-  convert_cpu_topology(Tail, lists:append(Acc, [{processor, convert_cpu_topology(Value, [])}]));
+    convert_cpu_topology(Tail, lists:append(Acc, [{processor, convert_cpu_topology(Value, [])}]));
+convert_cpu_topology({Key, Value}, _) ->
+    [{Key, Value}];
 convert_cpu_topology([], Acc) ->
-  Acc.
+    Acc.
 
 get_process_info(Pid) ->
     Info = [process_info(Pid, Key) || Key <- ?PROCESS_INFO],

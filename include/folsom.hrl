@@ -6,6 +6,7 @@
 -define(METER_READER_TABLE, folsom_meter_readers).
 -define(HISTORY_TABLE, folsom_histories).
 -define(DURATION_TABLE, folsom_durations).
+-define(SPIRAL_TABLE, folsom_spirals).
 
 -define(DEFAULT_LIMIT, 5).
 -define(DEFAULT_SIZE, 1028). % mimic codahale's metrics
@@ -13,6 +14,14 @@
 -define(DEFAULT_ALPHA, 0.015). % mimic codahale's metrics
 -define(DEFAULT_INTERVAL, 5000).
 -define(DEFAULT_SAMPLE_TYPE, uniform).
+
+-record(spiral, {
+          tid = folsom_metrics_histogram_ets:new(folsom_spiral,
+                                                 [ordered_set,
+                                                  {write_concurrency, true},
+                                                  public]),
+          server
+         }).
 
 -record(slide, {
           window = ?DEFAULT_SLIDING_WINDOW,
@@ -79,7 +88,7 @@
                       dist_buf_busy_limit,
                       %fullsweep_after, % included in garbage_collection
                       garbage_collection,
-                      global_heaps_size,
+                      %global_heaps_size, % deprecated
                       heap_sizes,
                       heap_type,
                       info,

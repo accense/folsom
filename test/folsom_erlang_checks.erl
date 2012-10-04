@@ -33,7 +33,8 @@
          delete_metrics/0,
          vm_metrics/0,
          counter_metric/2,
-         cpu_topology/0
+         cpu_topology/0,
+         c_compiler_used/0
         ]).
 
 -define(DATA, [0, 1, 5, 10, 100, 200, 500, 750, 1000, 2000, 5000]).
@@ -63,6 +64,8 @@ create_metrics() ->
 
     ok = folsom_metrics:new_duration(duration),
 
+    ok = folsom_metrics:new_spiral(spiral),
+
     ?debugFmt("ensuring meter tick is registered with gen_server~n", []),
     ok = ensure_meter_tick_exists(),
 
@@ -75,7 +78,10 @@ create_metrics() ->
     {state, List} = folsom_meter_timer_server:dump(),
     2 = length(List),
 
-    12 = length(folsom_metrics:get_metrics()),
+    %% check a server got started for the spiral metric
+    1 = length(supervisor:which_children(folsom_sample_slide_sup)),
+
+    13 = length(folsom_metrics:get_metrics()),
 
     ?debugFmt("~n~nmetrics: ~p~n", [folsom_metrics:get_metrics()]).
 
@@ -129,7 +135,9 @@ populate_metrics() ->
         [ folsom_metrics:notify({meter_reader, Item}) || Item <- [1, 10, 100, 1000, 10000]],
 
     % simulate an interval tick
-    folsom_metrics_meter_reader:tick(meter_reader).
+    folsom_metrics_meter_reader:tick(meter_reader),
+
+    folsom_metrics:notify_existing_metric(spiral, 100, spiral).
 
 check_metrics() ->
     0 = folsom_metrics:get_metric_value(counter),
@@ -188,10 +196,14 @@ check_metrics() ->
 
     %% check duration
     Dur = folsom_metrics:get_metric_value(duration),
-    duration_check(Dur).
+    duration_check(Dur),
+
+    %% check spiral
+    [{count, 100}, {one, 100}] = folsom_metrics:get_metric_value(spiral).
+
 
 delete_metrics() ->
-    14= length(ets:tab2list(?FOLSOM_TABLE)),
+    15 = length(ets:tab2list(?FOLSOM_TABLE)),
 
     ok = folsom_metrics:delete_metric(counter),
     ok = folsom_metrics:delete_metric(<<"gauge">>),
@@ -217,6 +229,7 @@ delete_metrics() ->
     0 = length(ets:tab2list(?METER_READER_TABLE)),
 
     ok = folsom_metrics:delete_metric(duration),
+    ok = folsom_metrics:delete_metric(spiral),
 
     0 = length(ets:tab2list(?FOLSOM_TABLE)).
 
@@ -326,25 +339,29 @@ for(N, LoopCount, Counter) ->
     for(N, LoopCount + 1, Counter).
 
 cpu_topology() ->
-    Test = [{node,[{processor,[{core,[{thread,{logical,1}},{thread,{logical,9}}]},
-                               {core,[{thread,{logical,3}},{thread,{logical,11}}]},
-                               {core,[{thread,{logical,5}},{thread,{logical,13}}]},
-                               {core,[{thread,{logical,7}},{thread,{logical,15}}]}]}]},
-            {node,[{processor,[{core,[{thread,{logical,0}},{thread,{logical,8}}]},
-                               {core,[{thread,{logical,2}},{thread,{logical,10}}]},
-                               {core,[{thread,{logical,4}},{thread,{logical,12}}]},
-                               {core,[{thread,{logical,6}},{thread,{logical,14}}]}]}]}],
+    ?debugFmt("Testing various CPU topologies ...~n", []),
+    {ok, [Data]} = file:consult("../test/cpu_topo_data"),
+    [run_convert_and_jsonify(Item) || Item <- Data].
 
-    ExpectedResult = [{node,[{processor,[{core,[{thread,[logical,1]},{thread,[logical,9]}]},
-                                         {core,[{thread,[logical,3]},{thread,[logical,11]}]},
-                                         {core,[{thread,[logical,5]},{thread,[logical,13]}]},
-                                         {core,[{thread,[logical,7]},{thread,[logical,15]}]}]}]},
-                      {node,[{processor,[{core,[{thread,[logical,0]},{thread,[logical,8]}]},
-                                         {core,[{thread,[logical,2]},{thread,[logical,10]}]},
-                                         {core,[{thread,[logical,4]},{thread,[logical,12]}]},
-                                         {core,[{thread,[logical,6]},{thread,[logical,14]}]}]}]}],
 
-    ExpectedResult = folsom_vm_metrics:convert_cpu_topology(Test, []).
+run_convert_and_jsonify(Item) ->
+    ?debugFmt("Converting ... ~n~p~n", [Item]),
+    Result = folsom_vm_metrics:convert_system_info({cpu_topology, Item}),
+    %?debugFmt("~p~n", [mochijson2:encode(Result)]).
+    mochijson2:encode(Result).
+
+c_compiler_used() ->
+    Test = [{gnuc, {4,4,5}},
+            {gnuc, {4,4}},
+            {msc, 1600}],
+
+    Expected = [[{compiler, gnuc}, {version, <<"4.4.5">>}],
+                [{compiler, gnuc}, {version, <<"4.4">>}],
+                [{compiler, msc}, {version, <<"1600">>}]],
+
+    ?assertEqual(Expected, [folsom_vm_metrics:convert_system_info({c_compiler_used, {Compiler, Version}})
+                             || {Compiler, Version} <- Test]).
+
 
 duration_check(Duration) ->
     [?assert(lists:keymember(Key, 1, Duration)) || Key <-
